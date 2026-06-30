@@ -7,6 +7,18 @@ const startTimer = asyncHandler(async (req, res) => {
   res.status(201).json({ success: true, timeLog });
 });
 
+// POST /api/v1/timelogs/:id/pause
+const pauseTimer = asyncHandler(async (req, res) => {
+  const timeLog = await timeLogService.pauseTimer(req.params.id, req.user._id);
+  res.json({ success: true, timeLog });
+});
+
+// POST /api/v1/timelogs/:id/resume
+const resumeTimer = asyncHandler(async (req, res) => {
+  const timeLog = await timeLogService.resumeTimer(req.params.id, req.user._id);
+  res.json({ success: true, timeLog });
+});
+
 // POST /api/v1/timelogs/:id/stop
 const stopTimer = asyncHandler(async (req, res) => {
   const timeLog = await timeLogService.stopTimer(req.params.id, req.user._id);
@@ -28,4 +40,4 @@ const getMySummary = asyncHandler(async (req, res) => {
   res.json({ success: true, summary });
 });
 
-module.exports = { startTimer, stopTimer, getActiveTimer, getMySummary };
+module.exports = { startTimer, pauseTimer, resumeTimer, stopTimer, getActiveTimer, getMySummary };

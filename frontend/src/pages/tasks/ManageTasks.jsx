@@ -163,6 +163,7 @@ export default function ManageTasks() {
                   <th className="px-4 py-3">Assigned To</th>
                   <th className="px-4 py-3">Department</th>
                   <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Note</th>
                   <th className="px-4 py-3"></th>
                 </tr>
               </thead>
@@ -176,6 +177,20 @@ export default function ManageTasks() {
                       <span className={`rounded-full px-2 py-1 text-xs font-medium ${statusStyles[t.status]}`}>
                         {t.status.replace('_', ' ')}
                       </span>
+                    </td>
+                    <td className="max-w-xs px-4 py-3 text-gray-600">
+                      {t.employeeNote ? (
+                        <div>
+                          <p className="whitespace-pre-wrap break-words">{t.employeeNote}</p>
+                          {t.noteUpdatedAt && (
+                            <p className="mt-1 text-xs text-gray-400">
+                              Updated {new Date(t.noteUpdatedAt).toLocaleString()}
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <button onClick={() => handleDelete(t._id)} className="text-red-500 hover:text-red-700">

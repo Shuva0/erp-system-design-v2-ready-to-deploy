@@ -87,10 +87,8 @@ const updateTask = asyncHandler(async (req, res) => {
     if (deadline) task.deadline = deadline;
     if (assignedTo) task.assignedTo = assignedTo;
   } else {
-    // Employees cannot freely change status here — there is intentionally no
-    // "pause" or arbitrary status edit for an employee. The only employee-driven
-    // transitions are: starting a timer (pending -> in_progress, via timelog.service)
-    // and marking complete (via the dedicated completeTask action below).
+    // Employees finish a task via the "Complete" action and begin it by
+    // starting a timer; they cannot freely edit other status fields here.
     throw new ApiError(403, 'Use the "Complete" action to finish a task, or start a timer to begin it.');
   }
 
@@ -98,9 +96,32 @@ const updateTask = asyncHandler(async (req, res) => {
   res.json({ success: true, task });
 });
 
+// PATCH /api/v1/tasks/:id/note
+// The assigned employee adds or edits a note explaining progress, blockers,
+// or details for this task. Admins/managers can read it but the assigned
+// employee (or an admin/manager on their behalf) authors it.
+const updateTaskNote = asyncHandler(async (req, res) => {
+  const task = await Task.findById(req.params.id);
+  if (!task) {
+    throw new ApiError(404, 'Task not found.');
+  }
+
+  const isOwner = String(task.assignedTo) === String(req.user._id);
+  const isManagerOrAdmin = ['admin', 'manager'].includes(req.user.role);
+  if (!isOwner && !isManagerOrAdmin) {
+    throw new ApiError(403, 'You can only add notes to your own task.');
+  }
+
+  task.employeeNote = req.body.note ?? '';
+  task.noteUpdatedAt = new Date();
+  await task.save();
+
+  res.json({ success: true, task });
+});
+
 // PATCH /api/v1/tasks/:id/complete
-// The ONLY way an employee finishes a task. Stops any running timer for it
-// (capped at the 7pm shift-end cutoff if applicable) and marks it completed.
+// The ONLY way an employee finishes a task. Stops any running/paused timer for
+// it and marks it completed.
 const completeTaskAction = asyncHandler(async (req, res) => {
   const task = await timeLogService.completeTask(req.params.id, req.user._id);
   res.json({ success: true, task });
@@ -116,4 +137,12 @@ const deleteTask = asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Task deleted.' });
 });
 
-module.exports = { getTasks, getTask, createTask, updateTask, completeTaskAction, deleteTask };
+module.exports = {
+  getTasks,
+  getTask,
+  createTask,
+  updateTask,
+  updateTaskNote,
+  completeTaskAction,
+  deleteTask,
+};

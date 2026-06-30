@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { getProductivity } from '../../api/reports.api';
 import DashboardLayout from '../../components/layout/DashboardLayout';
 
 export default function ReportsPage() {
   const [productivity, setProductivity] = useState([]);
   const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
 
   useEffect(() => {
     getProductivity()
@@ -37,7 +39,15 @@ export default function ReportsPage() {
               <tbody className="divide-y divide-gray-100">
                 {productivity.map((p) => (
                   <tr key={p.userId}>
-                    <td className="px-4 py-3 font-medium text-gray-900">{p.userName}</td>
+                    <td className="px-4 py-3 font-medium">
+                      <button
+                        onClick={() => navigate(`/admin/activity?userId=${p.userId}`)}
+                        className="text-indigo-600 hover:underline"
+                        title="View all-time activity"
+                      >
+                        {p.userName}
+                      </button>
+                    </td>
                     <td className="px-4 py-3 text-gray-700">{p.totalHours} hrs</td>
                     <td className="px-4 py-3 text-gray-700">{p.completedTasks}</td>
                   </tr>

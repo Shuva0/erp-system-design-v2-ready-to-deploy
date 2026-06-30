@@ -120,7 +120,13 @@ const getUserTaskHistory = asyncHandler(async (req, res) => {
   }
 
   const taskHistory = await timeLogService.getUserTaskBreakdown(user._id);
-  res.json({ success: true, user, taskHistory });
+
+  // Optional date filtering for the pause/resume activity (defaults to all data)
+  const from = req.query.from ? new Date(req.query.from) : null;
+  const to = req.query.to ? new Date(req.query.to) : null;
+  const dailyActivity = await timeLogService.getUserDailyActivity(user._id, from, to);
+
+  res.json({ success: true, user, taskHistory, dailyActivity });
 });
 
 // DELETE /api/v1/users/:id   (soft delete / deactivate)

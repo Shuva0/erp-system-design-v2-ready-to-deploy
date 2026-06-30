@@ -8,12 +8,14 @@ const NAV_ITEMS = {
     { to: '/admin/users', label: 'Users' },
     { to: '/admin/services', label: 'Departments' },
     { to: '/admin/reports', label: 'Reports' },
+    { to: '/admin/activity', label: 'Activity' },
   ],
   manager: [
     { to: '/admin', label: 'Overview' },
     { to: '/admin/tasks', label: 'Tasks' },
     { to: '/admin/services', label: 'Departments' },
     { to: '/admin/reports', label: 'Reports' },
+    { to: '/admin/activity', label: 'Activity' },
   ],
   employee: [{ to: '/dashboard', label: 'My Dashboard' }],
 };
@@ -35,7 +37,7 @@ export default function DashboardLayout({ children }) {
       <aside className="w-56 shrink-0 border-r border-gray-200 bg-white">
         <div className="border-b border-gray-200 px-5 py-4">
           <Link to="/" className="font-bold text-gray-900 hover:text-indigo-600">
-            ERP System
+           Primsy India ERP
           </Link>
           <p className="text-xs text-gray-400 capitalize">{user?.role}</p>
         </div>

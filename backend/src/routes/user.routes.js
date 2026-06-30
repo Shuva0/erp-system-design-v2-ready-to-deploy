@@ -15,7 +15,7 @@ const {
 
 router.get('/', protect, authorize('admin', 'manager'), getUsers);
 router.get('/:id', protect, getUser); // self-access checked inside controller logic if needed
-router.get('/:id/task-history', protect, authorize('admin'), getUserTaskHistory);
+router.get('/:id/task-history', protect, authorize('admin', 'manager'), getUserTaskHistory);
 router.post('/', protect, authorize('admin'), createUser);
 router.patch('/:id', protect, updateUser); // self or admin, checked in controller
 router.patch('/:id/role', protect, authorize('admin'), updateUserRole);

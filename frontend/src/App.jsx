@@ -5,7 +5,6 @@ import { ProtectedRoute, RoleRoute } from './routes/ProtectedRoute';
 import Home from './pages/home/Home';
 import Login from './pages/auth/Login';
 import Register from './pages/auth/Register';
-import OAuthSuccess from './pages/auth/OAuthSuccess';
 import EmployeeDashboard from './pages/employee/EmployeeDashboard';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import ManageUsers from './pages/admin/ManageUsers';
@@ -13,6 +12,7 @@ import UserTaskHistory from './pages/admin/UserTaskHistory';
 import ManageServices from './pages/admin/ManageServices';
 import ManageTasks from './pages/tasks/ManageTasks';
 import ReportsPage from './pages/reports/ReportsPage';
+import UserActivityReport from './pages/reports/UserActivityReport';
 
 function Unauthorized() {
   return (
@@ -34,7 +34,6 @@ function App() {
           <Route path="/" element={<Home />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
-          <Route path="/oauth-success" element={<OAuthSuccess />} />
           <Route path="/unauthorized" element={<Unauthorized />} />
 
           {/* Employee */}
@@ -77,6 +76,14 @@ function App() {
             element={
               <RoleRoute allowedRoles={['admin', 'manager']}>
                 <ReportsPage />
+              </RoleRoute>
+            }
+          />
+          <Route
+            path="/admin/activity"
+            element={
+              <RoleRoute allowedRoles={['admin', 'manager']}>
+                <UserActivityReport />
               </RoleRoute>
             }
           />

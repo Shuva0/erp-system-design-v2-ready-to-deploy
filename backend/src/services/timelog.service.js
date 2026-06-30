@@ -2,59 +2,32 @@ const TimeLog = require('../models/TimeLog');
 const Task = require('../models/Task');
 const ApiError = require('../utils/ApiError');
 
-const SHIFT_END_HOUR = 19; // 7:00 PM, in the server's local time
-
 /**
- * Returns today's 7pm cutoff as a Date object, anchored to the same
- * calendar day as the given reference date (defaults to now).
+ * Time-tracking service.
+ *
+ * The previous 7:00 PM automatic shift-end cut-off has been removed completely.
+ * Sessions now stay open until the employee stops or completes them. Employees
+ * may Pause and Resume an active session freely; paused time is excluded from
+ * the recorded duration, and every pause/resume click is timestamped.
  */
-function getShiftEndForDate(referenceDate = new Date()) {
-  const cutoff = new Date(referenceDate);
-  cutoff.setHours(SHIFT_END_HOUR, 0, 0, 0);
-  return cutoff;
-}
 
-/**
- * Auto-closes any timer that's still running past the 7pm shift-end cutoff
- * for the day it was started on. Called defensively before any timer read
- * so stale "still running" timers never silently survive past shift end,
- * even if the employee just left their laptop open.
- */
-async function autoCloseExpiredTimer(timeLog) {
-  if (!timeLog || timeLog.endTime) return timeLog;
-
-  const shiftEnd = getShiftEndForDate(timeLog.startTime);
-  const now = new Date();
-
-  if (now > shiftEnd) {
-    timeLog.endTime = shiftEnd;
-    timeLog.durationSeconds = Math.max(0, Math.round((shiftEnd - timeLog.startTime) / 1000));
-    timeLog.autoStopped = true;
-    await timeLog.save();
+/** Closes the currently-open pause interval (if any) and adds it to pausedSeconds. */
+function settleOpenPause(timeLog, at) {
+  if (timeLog.status === 'paused' && timeLog.lastPausedAt) {
+    const extra = Math.max(0, Math.round((at - timeLog.lastPausedAt) / 1000));
+    timeLog.pausedSeconds = (timeLog.pausedSeconds || 0) + extra;
+    timeLog.lastPausedAt = null;
   }
-
-  return timeLog;
 }
 
 /**
- * Starts a timer for a task. Enforces one running timer per user at a time —
- * this matters because without it, a user could start five timers and your
- * "hours worked" numbers become meaningless.
+ * Starts a timer for a task. Enforces one open (running or paused) timer per
+ * user at a time, so "hours worked" numbers stay meaningful.
  */
 async function startTimer(userId, taskId) {
-  const existingRunning = await TimeLog.findOne({ user: userId, endTime: null });
-  if (existingRunning) {
-    await autoCloseExpiredTimer(existingRunning);
-    // If it was auto-closed just now, the slot is free; otherwise it's a genuine duplicate.
-    const stillRunning = await TimeLog.findOne({ user: userId, endTime: null });
-    if (stillRunning) {
-      throw new ApiError(400, 'You already have a running timer. Stop it before starting a new one.');
-    }
-  }
-
-  const now = new Date();
-  if (now.getHours() >= SHIFT_END_HOUR) {
-    throw new ApiError(400, 'Your shift has ended for today (7:00 PM cutoff). You can resume tomorrow.');
+  const existingOpen = await TimeLog.findOne({ user: userId, endTime: null });
+  if (existingOpen) {
+    throw new ApiError(400, 'You already have an active timer. Stop it before starting a new one.');
   }
 
   const task = await Task.findById(taskId);
@@ -65,11 +38,13 @@ async function startTimer(userId, taskId) {
     throw new ApiError(400, 'This task is already marked completed.');
   }
 
+  const now = new Date();
   const timeLog = await TimeLog.create({
     task: taskId,
     user: userId,
     service: task.service,
     startTime: now,
+    status: 'running',
   });
 
   // Auto-move task to in_progress if it was still pending
@@ -82,39 +57,65 @@ async function startTimer(userId, taskId) {
 }
 
 /**
- * Stops a running timer and calculates duration. If 7pm has already passed
- * since the timer started, the duration is capped at the 7pm cutoff rather
- * than counting time after shift end.
+ * Pauses a running timer. Records the exact pause timestamp.
  */
-async function stopTimer(timeLogId, userId) {
+async function pauseTimer(timeLogId, userId) {
   const timeLog = await TimeLog.findById(timeLogId);
+  if (!timeLog) throw new ApiError(404, 'Time log not found.');
+  if (String(timeLog.user) !== String(userId)) throw new ApiError(403, 'You can only pause your own timer.');
+  if (timeLog.endTime) throw new ApiError(400, 'This timer has already been stopped.');
+  if (timeLog.status === 'paused') throw new ApiError(400, 'This timer is already paused.');
 
-  if (!timeLog) {
-    throw new ApiError(404, 'Time log not found.');
-  }
-  if (String(timeLog.user) !== String(userId)) {
-    throw new ApiError(403, 'You can only stop your own timer.');
-  }
-  if (timeLog.endTime) {
-    throw new ApiError(400, 'This timer was already stopped.');
-  }
-
-  const shiftEnd = getShiftEndForDate(timeLog.startTime);
   const now = new Date();
-  const effectiveEnd = now > shiftEnd ? shiftEnd : now;
-
-  timeLog.endTime = effectiveEnd;
-  timeLog.durationSeconds = Math.max(0, Math.round((effectiveEnd - timeLog.startTime) / 1000));
-  if (now > shiftEnd) timeLog.autoStopped = true;
+  timeLog.status = 'paused';
+  timeLog.lastPausedAt = now;
+  timeLog.pauseLog.push({ type: 'pause', at: now });
   await timeLog.save();
-
   return timeLog;
 }
 
 /**
- * Marks a task completed and stops its active timer if one is running.
- * This is the "Complete" action — there is deliberately no "pause": a
- * task is either being actively timed, or it's done.
+ * Resumes a paused timer. Records the exact resume timestamp and folds the
+ * just-finished pause interval into pausedSeconds.
+ */
+async function resumeTimer(timeLogId, userId) {
+  const timeLog = await TimeLog.findById(timeLogId);
+  if (!timeLog) throw new ApiError(404, 'Time log not found.');
+  if (String(timeLog.user) !== String(userId)) throw new ApiError(403, 'You can only resume your own timer.');
+  if (timeLog.endTime) throw new ApiError(400, 'This timer has already been stopped.');
+  if (timeLog.status !== 'paused') throw new ApiError(400, 'This timer is not paused.');
+
+  const now = new Date();
+  settleOpenPause(timeLog, now);
+  timeLog.status = 'running';
+  timeLog.pauseLog.push({ type: 'resume', at: now });
+  await timeLog.save();
+  return timeLog;
+}
+
+/**
+ * Stops a running/paused timer and calculates net duration (excluding any
+ * time spent paused).
+ */
+async function stopTimer(timeLogId, userId) {
+  const timeLog = await TimeLog.findById(timeLogId);
+  if (!timeLog) throw new ApiError(404, 'Time log not found.');
+  if (String(timeLog.user) !== String(userId)) throw new ApiError(403, 'You can only stop your own timer.');
+  if (timeLog.endTime) throw new ApiError(400, 'This timer was already stopped.');
+
+  const now = new Date();
+  settleOpenPause(timeLog, now); // close any open pause before finalizing
+
+  const grossSeconds = Math.max(0, Math.round((now - timeLog.startTime) / 1000));
+  timeLog.endTime = now;
+  timeLog.durationSeconds = Math.max(0, grossSeconds - (timeLog.pausedSeconds || 0));
+  timeLog.status = 'stopped';
+  await timeLog.save();
+  return timeLog;
+}
+
+/**
+ * Marks a task completed and stops its active timer if one is running/paused.
  */
 async function completeTask(taskId, userId) {
   const activeLog = await TimeLog.findOne({ task: taskId, user: userId, endTime: null });
@@ -136,23 +137,15 @@ async function completeTask(taskId, userId) {
 }
 
 /**
- * Returns the currently running timer for a user, if any. Auto-closes it
- * first if shift end has already passed, so the frontend never shows a
- * "still running" timer from yesterday or past 7pm today.
+ * Returns the currently open (running or paused) timer for a user, if any.
  */
 async function getActiveTimer(userId) {
   const timeLog = await TimeLog.findOne({ user: userId, endTime: null }).populate('task', 'title');
-  if (!timeLog) return null;
-
-  await autoCloseExpiredTimer(timeLog);
-  return timeLog.endTime ? null : timeLog;
+  return timeLog || null;
 }
 
 /**
- * Daily/weekly summary for one user: total seconds worked, grouped by day.
- * Uses MongoDB's aggregation pipeline — this is the standard way to do
- * "group and sum" operations efficiently in MongoDB rather than pulling
- * all documents into Node and summing in JavaScript.
+ * Daily/weekly summary for one user: total net seconds worked, grouped by day.
  */
 async function getUserSummary(userId, fromDate, toDate) {
   const result = await TimeLog.aggregate([
@@ -175,16 +168,14 @@ async function getUserSummary(userId, fromDate, toDate) {
   const totalSeconds = result.reduce((sum, day) => sum + day.totalSeconds, 0);
 
   return {
-    byDay: result, // [{ _id: '2026-06-20', totalSeconds: 14400 }, ...]
+    byDay: result,
     totalSeconds,
     totalHours: (totalSeconds / 3600).toFixed(2),
   };
 }
 
 /**
- * Per-task time breakdown for a single user: every task assigned to them,
- * with first start time, last end time, total duration, and current status.
- * This is what powers the admin's "drill into one user" view.
+ * Per-task time breakdown for a single user, including pause/resume counts.
  */
 async function getUserTaskBreakdown(userId) {
   const logs = await TimeLog.aggregate([
@@ -196,6 +187,28 @@ async function getUserTaskBreakdown(userId) {
         endDate: { $max: '$endTime' },
         totalSeconds: { $sum: { $ifNull: ['$durationSeconds', 0] } },
         sessionCount: { $sum: 1 },
+        pauseCount: {
+          $sum: {
+            $size: {
+              $filter: {
+                input: { $ifNull: ['$pauseLog', []] },
+                as: 'e',
+                cond: { $eq: ['$$e.type', 'pause'] },
+              },
+            },
+          },
+        },
+        resumeCount: {
+          $sum: {
+            $size: {
+              $filter: {
+                input: { $ifNull: ['$pauseLog', []] },
+                as: 'e',
+                cond: { $eq: ['$$e.type', 'resume'] },
+              },
+            },
+          },
+        },
       },
     },
     { $lookup: { from: 'tasks', localField: '_id', foreignField: '_id', as: 'task' } },
@@ -205,9 +218,12 @@ async function getUserTaskBreakdown(userId) {
         taskId: '$_id',
         title: '$task.title',
         status: '$task.status',
+        employeeNote: '$task.employeeNote',
         startDate: 1,
         endDate: 1,
         sessionCount: 1,
+        pauseCount: 1,
+        resumeCount: 1,
         totalSeconds: 1,
         totalHours: { $divide: ['$totalSeconds', 3600] },
       },
@@ -218,12 +234,53 @@ async function getUserTaskBreakdown(userId) {
   return logs;
 }
 
+/**
+ * Per-user, per-day pause/resume activity with the exact timestamps of every
+ * click. Powers the admin/manager "view full pause/resume logs for the day"
+ * requirement on the employee profile and on completed tasks.
+ */
+async function getUserDailyActivity(userId, fromDate, toDate) {
+  const match = { user: userId };
+  if (fromDate || toDate) {
+    match.startTime = {};
+    if (fromDate) match.startTime.$gte = fromDate;
+    if (toDate) match.startTime.$lte = toDate;
+  }
+
+  const logs = await TimeLog.find(match).populate('task', 'title').sort({ startTime: 1 });
+
+  const byDay = {};
+  for (const log of logs) {
+    for (const ev of log.pauseLog || []) {
+      const day = new Date(ev.at).toISOString().slice(0, 10);
+      if (!byDay[day]) byDay[day] = { date: day, pauseCount: 0, resumeCount: 0, events: [] };
+      if (ev.type === 'pause') byDay[day].pauseCount += 1;
+      if (ev.type === 'resume') byDay[day].resumeCount += 1;
+      byDay[day].events.push({
+        type: ev.type,
+        at: ev.at,
+        task: log.task?.title || 'Task',
+        taskId: log.task?._id,
+      });
+    }
+  }
+
+  return Object.values(byDay)
+    .map((d) => {
+      d.events.sort((a, b) => new Date(a.at) - new Date(b.at));
+      return d;
+    })
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+
 module.exports = {
   startTimer,
+  pauseTimer,
+  resumeTimer,
   stopTimer,
   completeTask,
   getActiveTimer,
   getUserSummary,
   getUserTaskBreakdown,
-  getShiftEndForDate,
+  getUserDailyActivity,
 };

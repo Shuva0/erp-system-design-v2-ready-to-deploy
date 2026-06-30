@@ -12,6 +12,7 @@ export default function UserTaskHistory() {
   const { id } = useParams();
   const [user, setUser] = useState(null);
   const [taskHistory, setTaskHistory] = useState([]);
+  const [dailyActivity, setDailyActivity] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -20,6 +21,7 @@ export default function UserTaskHistory() {
       .then((res) => {
         setUser(res.data.user);
         setTaskHistory(res.data.taskHistory);
+        setDailyActivity(res.data.dailyActivity || []);
       })
       .catch((err) => setError(err.response?.data?.message || 'Failed to load this user.'))
       .finally(() => setLoading(false));
@@ -91,6 +93,9 @@ export default function UserTaskHistory() {
                   <th className="px-4 py-3">Start Date</th>
                   <th className="px-4 py-3">End Date</th>
                   <th className="px-4 py-3">Total Time</th>
+                  <th className="px-4 py-3">Pauses</th>
+                  <th className="px-4 py-3">Resumes</th>
+                  <th className="px-4 py-3">Note</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -105,10 +110,49 @@ export default function UserTaskHistory() {
                     <td className="px-4 py-3 text-gray-600">{formatDate(t.startDate)}</td>
                     <td className="px-4 py-3 text-gray-600">{formatDate(t.endDate)}</td>
                     <td className="px-4 py-3 font-medium text-gray-900">{t.totalHours.toFixed(2)} hrs</td>
+                    <td className="px-4 py-3 text-gray-600">{t.pauseCount || 0}</td>
+                    <td className="px-4 py-3 text-gray-600">{t.resumeCount || 0}</td>
+                    <td className="px-4 py-3 text-gray-600">{t.employeeNote || '—'}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          )}
+        </div>
+
+        {/* Pause / Resume daily logs with exact timestamps */}
+        <div>
+          <h2 className="mb-3 text-lg font-semibold text-gray-900">Pause / Resume Activity</h2>
+          {dailyActivity.length === 0 ? (
+            <p className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-400">
+              No pause/resume activity recorded.
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {dailyActivity.map((d) => (
+                <div key={d.date} className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+                  <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-4 py-2">
+                    <span className="font-medium text-gray-900">{d.date}</span>
+                    <span className="text-xs text-gray-500">
+                      {d.pauseCount} pause{d.pauseCount !== 1 ? 's' : ''} · {d.resumeCount} resume{d.resumeCount !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                  <ul className="divide-y divide-gray-100">
+                    {d.events.map((e, i) => (
+                      <li key={i} className="flex items-center justify-between px-4 py-2 text-sm">
+                        <span className="text-gray-700">
+                          <span className={e.type === 'pause' ? 'font-medium text-amber-600' : 'font-medium text-indigo-600'}>
+                            {e.type.toUpperCase()}
+                          </span>{' '}
+                          · {e.task}
+                        </span>
+                        <span className="text-gray-500">{formatDate(e.at)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       </div>

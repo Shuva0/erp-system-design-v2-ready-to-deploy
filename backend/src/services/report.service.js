@@ -75,4 +75,103 @@ async function getProductivity(fromDate, toDate) {
   }));
 }
 
-module.exports = { getOverview, getProductivity };
+
+/**
+ * Full activity report for a single user within an (optional) date range.
+ * Defaults to ALL data when no range is supplied. Includes: tasks worked on
+ * with time taken per task, pause/resume counts, and the detailed timestamped
+ * activity log of every session and pause/resume click.
+ */
+async function getUserActivity(userId, fromDate, toDate) {
+  const uid = new mongoose.Types.ObjectId(String(userId));
+  const range = {};
+  if (fromDate) range.$gte = fromDate;
+  if (toDate) range.$lte = toDate;
+  const hasRange = Object.keys(range).length > 0;
+
+  const logMatch = { user: uid };
+  if (hasRange) logMatch.startTime = range;
+
+  const logs = await TimeLog.find(logMatch)
+    .populate('task', 'title status')
+    .sort({ startTime: 1 });
+
+  // Per-task aggregation
+  const taskMap = new Map();
+  let totalSeconds = 0;
+  let pauseCount = 0;
+  let resumeCount = 0;
+  const sessions = [];
+
+  for (const log of logs) {
+    const taskId = log.task?._id ? String(log.task._id) : 'unknown';
+    const title = log.task?.title || 'Task';
+    const status = log.task?.status || 'unknown';
+    const dur = log.durationSeconds || 0;
+    totalSeconds += dur;
+
+    const logPause = (log.pauseLog || []).filter((e) => e.type === 'pause').length;
+    const logResume = (log.pauseLog || []).filter((e) => e.type === 'resume').length;
+    pauseCount += logPause;
+    resumeCount += logResume;
+
+    if (!taskMap.has(taskId)) {
+      taskMap.set(taskId, {
+        taskId,
+        title,
+        status,
+        totalSeconds: 0,
+        pauseCount: 0,
+        resumeCount: 0,
+        sessionCount: 0,
+      });
+    }
+    const t = taskMap.get(taskId);
+    t.totalSeconds += dur;
+    t.pauseCount += logPause;
+    t.resumeCount += logResume;
+    t.sessionCount += 1;
+
+    sessions.push({
+      taskTitle: title,
+      startTime: log.startTime,
+      endTime: log.endTime,
+      durationSeconds: dur,
+      status: log.status,
+      pauseEvents: (log.pauseLog || []).map((e) => ({ type: e.type, at: e.at })),
+    });
+  }
+
+  // Completed tasks count within range (by completion/update time)
+  const completedMatch = { assignedTo: uid, status: 'completed' };
+  if (hasRange) completedMatch.updatedAt = range;
+  const completedTasks = await Task.find(completedMatch).select('title updatedAt');
+
+  const tasks = [...taskMap.values()].map((t) => ({
+    ...t,
+    totalHours: (t.totalSeconds / 3600).toFixed(2),
+  }));
+
+  return {
+    range: {
+      from: fromDate ? fromDate.toISOString() : null,
+      to: toDate ? toDate.toISOString() : null,
+    },
+    totals: {
+      totalSeconds,
+      totalHours: (totalSeconds / 3600).toFixed(2),
+      pauseCount,
+      resumeCount,
+      completedCount: completedTasks.length,
+      taskCount: tasks.length,
+    },
+    completedTasks: completedTasks.map((t) => ({
+      title: t.title,
+      completedAt: t.updatedAt,
+    })),
+    tasks,
+    sessions,
+  };
+}
+
+module.exports = { getOverview, getProductivity, getUserActivity };

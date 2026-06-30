@@ -68,13 +68,4 @@ const getMe = asyncHandler(async (req, res) => {
   res.json({ success: true, user: req.user });
 });
 
-// GET /api/v1/auth/google/callback  (called after passport.authenticate('google') succeeds)
-const googleCallback = asyncHandler(async (req, res) => {
-  // req.user is set by Passport after successful Google auth
-  const token = generateToken(req.user);
-
-  // Redirect back to frontend with the token (frontend reads it from the URL)
-  res.redirect(`${process.env.FRONTEND_URL}/oauth-success?token=${token}`);
-});
-
-module.exports = { register, login, getMe, googleCallback };
+module.exports = { register, login, getMe };

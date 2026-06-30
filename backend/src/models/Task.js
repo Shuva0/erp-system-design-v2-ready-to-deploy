@@ -11,6 +11,12 @@ const taskSchema = new mongoose.Schema(
     priority: { type: String, enum: ['low', 'medium', 'high'], default: 'medium' },
     status: { type: String, enum: ['pending', 'in_progress', 'completed'], default: 'pending' },
     deadline: { type: Date },
+
+    // Employee-authored note explaining progress, blockers, or details for
+    // this specific task. The assigned employee can add and edit it; admins
+    // and managers can read it.
+    employeeNote: { type: String, default: '' },
+    noteUpdatedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
